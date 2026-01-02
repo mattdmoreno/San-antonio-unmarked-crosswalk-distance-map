@@ -1,0 +1,9 @@
+.DS_Store
+
+# Build artifacts / data blobs
+/data/
+*.pmtiles
+*.mbtiles
+
+# Logs
+*.log
