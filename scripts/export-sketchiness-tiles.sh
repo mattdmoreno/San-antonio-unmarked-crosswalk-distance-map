@@ -17,7 +17,7 @@ rm -f "$OUT_MBTILES" "$OUT_PMTILES"
 # Export and convert
 ogr2ogr -f GeoJSONSeq /dev/stdout \
   "PG:host=localhost port=5432 dbname=seattle_pedestrians user=postgres password=postgres" \
-  -sql "SELECT osm_id, name, highway, dist_to_crossing_meters, geom FROM streets_analyzed" \
+  -sql "SELECT osm_id, name, highway, dist_to_crossing_meters, nearest_crossing_marked, geom FROM streets_analyzed" \
   | tippecanoe -o "$OUT_MBTILES" \
   --force \
   --layer=streets \

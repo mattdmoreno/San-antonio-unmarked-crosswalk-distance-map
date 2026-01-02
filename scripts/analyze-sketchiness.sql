@@ -1,9 +1,17 @@
 -- Create a table of crosswalks
 DROP TABLE IF EXISTS crosswalks;
 CREATE TABLE crosswalks AS
-SELECT way AS geom FROM planet_osm_point WHERE highway = 'crossing'
+SELECT
+    way AS geom,
+    (tags->'crossing' IN ('marked', 'zebra')) AS marked
+FROM planet_osm_point
+WHERE highway = 'crossing'
 UNION ALL
-SELECT way AS geom FROM planet_osm_line WHERE highway = 'footway' AND tags->'footway' = 'crossing';
+SELECT
+    way AS geom,
+    (tags->'crossing' IN ('marked', 'zebra')) AS marked
+FROM planet_osm_line
+WHERE highway = 'footway' AND tags->'footway' = 'crossing';
 
 CREATE INDEX idx_crosswalks_geom ON crosswalks USING GIST (geom);
 
@@ -39,13 +47,21 @@ CREATE INDEX idx_streets_analyzed_geom ON streets_analyzed USING GIST (geom);
 
 -- Add a column for sketchiness (distance to nearest crosswalk)
 ALTER TABLE streets_analyzed ADD COLUMN dist_to_crossing_meters FLOAT;
+ALTER TABLE streets_analyzed ADD COLUMN nearest_crossing_marked BOOLEAN;
 
 -- Calculate distance using KNN
 -- Using geography type for accurate meters
 UPDATE streets_analyzed s
-SET dist_to_crossing_meters = (
-  SELECT ST_Distance(ST_Transform(s.geom, 4326)::geography, ST_Transform(c.geom, 4326)::geography)
-  FROM crosswalks c
-  ORDER BY s.geom <-> c.geom
-  LIMIT 1
-);
+SET
+        dist_to_crossing_meters = (
+            SELECT ST_Distance(ST_Transform(s.geom, 4326)::geography, ST_Transform(c.geom, 4326)::geography)
+            FROM crosswalks c
+            ORDER BY s.geom <-> c.geom
+            LIMIT 1
+        ),
+        nearest_crossing_marked = (
+            SELECT c.marked
+            FROM crosswalks c
+            ORDER BY s.geom <-> c.geom
+            LIMIT 1
+        );

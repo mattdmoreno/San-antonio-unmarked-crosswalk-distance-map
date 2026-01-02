@@ -132,18 +132,34 @@ function buildBasicOpenMapTilesStyle(pmtilesUrl: string, sketchinessUrl: string)
             20,
             12,
           ],
+          // Residential streets are always green; other roads scale by distance.
           'line-color': [
-            'interpolate',
-            ['linear'],
-            ['get', 'dist_to_crossing_meters'],
-            0,
-            '#4caf50', // Chill Green
-            50,
-            '#fdd835', // Mellow Yellow
-            100,
-            '#e53935', // Red
-            200,
-            '#b71c1c', // Dark Red
+            'case',
+            ['==', ['get', 'highway'], 'residential'],
+            '#4caf50',
+            [
+              'interpolate',
+              ['linear'],
+              ['get', 'dist_to_crossing_meters'],
+              0,
+              '#4caf50', // Chill Green
+              20,
+              '#fdd835', // Mellow Yellow
+              50,
+              '#e53935', // Red
+              100,
+              '#b71c1c', // Dark Red
+            ],
+          ],
+          // Differentiate marked vs unmarked crossings.
+          // If nearest crossing is unmarked, render as dashed.
+          'line-dasharray': [
+            'case',
+            ['==', ['get', 'highway'], 'residential'],
+            ['literal', [1, 0]],
+            ['==', ['get', 'nearest_crossing_marked'], true],
+            ['literal', [1, 0]],
+            ['literal', [2, 2]],
           ],
           'line-opacity': 0.8,
         },
@@ -205,7 +221,7 @@ export default function Map() {
       zoom: 11,
       minZoom: 2,
       maxZoom: 20,
-      attributionControl: true,
+      attributionControl: { compact: true },
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
@@ -238,6 +254,18 @@ export default function Map() {
         ? Math.round(props.dist_to_crossing_meters) 
         : 'N/A';
 
+      const markedRaw = (props as Record<string, unknown>).nearest_crossing_marked;
+      const marked =
+        typeof markedRaw === 'boolean'
+          ? markedRaw
+          : typeof markedRaw === 'number'
+            ? markedRaw !== 0
+            : typeof markedRaw === 'string'
+              ? ['true', 't', '1', 'yes', 'y'].includes(markedRaw.toLowerCase())
+              : null;
+
+      const crossingLabel = marked === null ? 'Unknown' : marked ? 'Marked' : 'Unmarked';
+
       new maplibregl.Popup()
         .setLngLat(coordinates)
         .setHTML(`
@@ -245,6 +273,7 @@ export default function Map() {
             <h3 style="margin: 0 0 4px; font-size: 14px; font-weight: bold;">${displayName}</h3>
             <p style="margin: 0; font-size: 12px;">Type: ${highwayType}</p>
             <p style="margin: 0; font-size: 12px;">Dist to Crosswalk: <strong>${distance}m</strong></p>
+            <p style="margin: 0; font-size: 12px;">Nearest Crosswalk: <strong>${crossingLabel}</strong></p>
           </div>
         `)
         .addTo(map);
