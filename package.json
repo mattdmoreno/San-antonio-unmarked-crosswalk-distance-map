@@ -1,0 +1,31 @@
+{
+  "name": "pedestrian-sketchiness-map",
+  "private": true,
+  "version": "0.0.1",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "concurrently -k -n TILES,NEXT -c cyan,green \"pnpm dev:tiles\" \"next dev\"",
+    "dev:tiles": "http-server ./data --cors -p 8080",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:import": "chmod +x ./scripts/import-data.sh && ./scripts/import-data.sh",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.0.0",
+    "next": "^15.1.0",
+    "pmtiles": "^4.3.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "concurrently": "^9.1.0",
+    "http-server": "^14.1.1",
+    "typescript": "^5.7.2"
+  }
+}

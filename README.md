@@ -8,7 +8,8 @@ The current setup builds an **OpenMapTiles-compatible** tileset using **Planetil
 
 - Docker Desktop (for running Planetiler)
 - `curl`
-- Optional (for quick local serving): Node.js + `npx`
+- Node.js (for the Next.js app)
+- `pnpm` (recommended; or enable via `corepack`)
 
 ## Build the Seattle basemap (PMTiles)
 
@@ -34,12 +35,28 @@ PMTiles requires an HTTP server that supports **Range requests**.
 
 From the repo root:
 
+This repo’s dev script starts a tiles server automatically (see below), but you can also run it directly:
+
 ```sh
-npx http-server ./data --cors -p 8080
+pnpm dev:tiles
 ```
 
 Then your PMTiles is available at:
 - `http://localhost:8080/basemap-seattle.pmtiles`
+
+## Run the web app (Next.js)
+
+Install deps:
+
+```sh
+pnpm install
+```
+
+Start dev (runs Next.js + tile server together):
+
+```sh
+pnpm dev
+```
 
 ## Notes
 

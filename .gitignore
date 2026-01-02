@@ -1,5 +1,10 @@
 .DS_Store
 
+# Node / Next
+node_modules/
+.next/
+out/
+
 # Build artifacts / data blobs
 /data/
 *.pmtiles
