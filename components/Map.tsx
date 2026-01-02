@@ -8,7 +8,7 @@ import * as pmtiles from 'pmtiles';
 
 const SEATTLE_CENTER: [number, number] = [-122.3321, 47.6062];
 
-function buildBasicOpenMapTilesStyle(pmtilesUrl: string): StyleSpecification {
+function buildBasicOpenMapTilesStyle(pmtilesUrl: string, sketchinessUrl: string): StyleSpecification {
   return {
     version: 8,
     name: 'Seattle (PMTiles) – basic',
@@ -21,6 +21,10 @@ function buildBasicOpenMapTilesStyle(pmtilesUrl: string): StyleSpecification {
         url: `pmtiles://${pmtilesUrl}`,
         attribution:
           '<a href="https://www.openmaptiles.org/" target="_blank">&copy; OpenMapTiles</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+      },
+      sketchiness: {
+        type: 'vector',
+        url: `pmtiles://${sketchinessUrl}`,
       },
     },
     layers: [
@@ -106,6 +110,44 @@ function buildBasicOpenMapTilesStyle(pmtilesUrl: string): StyleSpecification {
           'line-opacity': 0.7,
         },
       },
+      // Sketchiness Layer
+      {
+        id: 'sketchiness-lines',
+        type: 'line',
+        source: 'sketchiness',
+        'source-layer': 'streets',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-width': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            10,
+            2,
+            15,
+            5,
+            20,
+            12,
+          ],
+          'line-color': [
+            'interpolate',
+            ['linear'],
+            ['get', 'dist_to_crossing_meters'],
+            0,
+            '#4caf50', // Chill Green
+            50,
+            '#fdd835', // Mellow Yellow
+            100,
+            '#e53935', // Red
+            200,
+            '#b71c1c', // Dark Red
+          ],
+          'line-opacity': 0.8,
+        },
+      },
       // Labels (Place names)
       {
         id: 'place_label',
@@ -137,7 +179,11 @@ export default function Map() {
     return 'http://localhost:8080/basemap-seattle.pmtiles';
   }, []);
 
-  const style = useMemo(() => buildBasicOpenMapTilesStyle(pmtilesUrl), [pmtilesUrl]);
+  const sketchinessUrl = useMemo(() => {
+    return 'http://localhost:8080/sketchiness.pmtiles';
+  }, []);
+
+  const style = useMemo(() => buildBasicOpenMapTilesStyle(pmtilesUrl, sketchinessUrl), [pmtilesUrl, sketchinessUrl]);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -158,13 +204,60 @@ export default function Map() {
       center: SEATTLE_CENTER,
       zoom: 11,
       minZoom: 2,
-      maxZoom: 16,
+      maxZoom: 20,
       attributionControl: true,
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
 
     mapRef.current = map;
+
+    // Add click handler for sketchiness lines
+    map.on('click', 'sketchiness-lines', (e) => {
+      if (!e.features || e.features.length === 0) return;
+
+      const feature = e.features[0];
+      const props = feature.properties;
+      
+      if (!props) return;
+
+      const coordinates = e.lngLat;
+      
+      // Helper to capitalize words
+      const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+      
+      let displayName = props.name;
+      const highwayType = props.highway ? capitalize(props.highway) : 'Unknown Type';
+
+      // If no name, construct a descriptive name from the type
+      if (!displayName) {
+        displayName = `${highwayType} Road`;
+      }
+
+      const distance = typeof props.dist_to_crossing_meters === 'number' 
+        ? Math.round(props.dist_to_crossing_meters) 
+        : 'N/A';
+
+      new maplibregl.Popup()
+        .setLngLat(coordinates)
+        .setHTML(`
+          <div style="font-family: sans-serif; padding: 4px;">
+            <h3 style="margin: 0 0 4px; font-size: 14px; font-weight: bold;">${displayName}</h3>
+            <p style="margin: 0; font-size: 12px;">Type: ${highwayType}</p>
+            <p style="margin: 0; font-size: 12px;">Dist to Crosswalk: <strong>${distance}m</strong></p>
+          </div>
+        `)
+        .addTo(map);
+    });
+
+    // Change cursor on hover
+    map.on('mouseenter', 'sketchiness-lines', () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+
+    map.on('mouseleave', 'sketchiness-lines', () => {
+      map.getCanvas().style.cursor = '';
+    });
 
     return () => {
       map.remove();

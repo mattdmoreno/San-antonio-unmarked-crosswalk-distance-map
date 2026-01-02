@@ -7,12 +7,33 @@ SELECT way AS geom FROM planet_osm_line WHERE highway = 'footway' AND tags->'foo
 
 CREATE INDEX idx_crosswalks_geom ON crosswalks USING GIST (geom);
 
--- Create a table of streets to analyze
+-- Create a table of streets to analyze, segmented into ~20m chunks
 DROP TABLE IF EXISTS streets_analyzed;
 CREATE TABLE streets_analyzed AS
-SELECT osm_id, name, highway, way AS geom
-FROM planet_osm_line
-WHERE highway IN ('residential', 'tertiary', 'secondary', 'primary', 'trunk', 'service', 'unclassified', 'footway', 'path', 'cycleway');
+WITH simple_lines AS (
+    -- Ensure we have single LineStrings
+    SELECT osm_id, name, highway, (ST_Dump(way)).geom AS geom
+    FROM planet_osm_line
+    WHERE highway IN ('residential', 'tertiary', 'secondary', 'primary', 'trunk')
+),
+segmented AS (
+    SELECT
+        osm_id,
+        name,
+        highway,
+        ST_LineSubstring(
+            geom,
+            n * 20.0 / ST_Length(geom),
+            LEAST((n + 1) * 20.0 / ST_Length(geom), 1.0)
+        ) AS geom
+    FROM
+        simple_lines
+    CROSS JOIN LATERAL
+        generate_series(0, CEIL(ST_Length(geom) / 20.0)::int - 1) AS n
+    WHERE
+        ST_Length(geom) > 0
+)
+SELECT * FROM segmented;
 
 CREATE INDEX idx_streets_analyzed_geom ON streets_analyzed USING GIST (geom);
 
