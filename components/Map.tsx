@@ -132,20 +132,73 @@ function buildBasicOpenMapTilesStyle(pmtilesUrl: string, sketchinessUrl: string)
             20,
             12,
           ],
+          // Residential streets are always green; other roads scale by distance.
           'line-color': [
-            'interpolate',
-            ['linear'],
-            ['get', 'dist_to_crossing_meters'],
-            0,
-            '#4caf50', // Chill Green
-            50,
-            '#fdd835', // Mellow Yellow
-            100,
-            '#e53935', // Red
-            200,
-            '#b71c1c', // Dark Red
+            'case',
+            ['==', ['get', 'highway'], 'residential'],
+            '#4caf50',
+            [
+              'interpolate',
+              ['linear'],
+              ['get', 'dist_to_crossing_meters'],
+              0,
+              '#4caf50', // Chill Green
+              50,
+              '#fdd835', // Mellow Yellow
+              75,
+              '#e53935', // Red
+              100,
+              '#b71c1c', // Dark Red
+            ],
+          ],
+          // Differentiate marked vs unmarked crossings.
+          // If nearest crossing is unmarked, render as dashed.
+          'line-dasharray': [
+            'case',
+            ['==', ['get', 'highway'], 'residential'],
+            ['literal', [1, 0]],
+            ['==', ['get', 'nearest_crossing_marked'], true],
+            ['literal', [1, 0]],
+            ['literal', [2, 2]],
           ],
           'line-opacity': 0.8,
+        },
+      },
+
+      // Road labels (street names)
+      {
+        id: 'road_label',
+        type: 'symbol',
+        source: 'omtiles',
+        'source-layer': 'transportation_name',
+        minzoom: 13,
+        layout: {
+          'symbol-placement': 'line',
+          'text-field': [
+            'coalesce',
+            ['get', 'name:en'],
+            ['get', 'name'],
+            ['get', 'ref'],
+          ],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            13,
+            10,
+            16,
+            13,
+          ],
+          'text-max-angle': 30,
+          'text-padding': 2,
+          'text-keep-upright': true,
+        },
+        paint: {
+          'text-color': '#333333',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1,
+          'text-halo-blur': 0.5,
         },
       },
       // Labels (Place names)
@@ -205,7 +258,7 @@ export default function Map() {
       zoom: 11,
       minZoom: 2,
       maxZoom: 20,
-      attributionControl: true,
+      attributionControl: { compact: true },
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
@@ -238,6 +291,27 @@ export default function Map() {
         ? Math.round(props.dist_to_crossing_meters) 
         : 'N/A';
 
+      const markedRaw = (props as Record<string, unknown>).nearest_crossing_marked;
+      const marked =
+        typeof markedRaw === 'boolean'
+          ? markedRaw
+          : typeof markedRaw === 'number'
+            ? markedRaw !== 0
+            : typeof markedRaw === 'string'
+              ? ['true', 't', '1', 'yes', 'y'].includes(markedRaw.toLowerCase())
+              : null;
+
+      const crossingLabel = marked === null ? 'Unknown' : marked ? 'Marked' : 'Unmarked';
+
+      const latLng = `${coordinates.lat},${coordinates.lng}`;
+      const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(latLng)}`;
+      const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(latLng)}`;
+
+      const osmId = (props as Record<string, unknown>).osm_id;
+      const osmWayId = typeof osmId === 'number' ? osmId : typeof osmId === 'string' ? Number(osmId) : null;
+      const osmViewUrl = osmWayId ? `https://www.openstreetmap.org/way/${osmWayId}` : null;
+      const osmEditUrl = osmWayId ? `https://www.openstreetmap.org/edit?way=${osmWayId}` : null;
+
       new maplibregl.Popup()
         .setLngLat(coordinates)
         .setHTML(`
@@ -245,6 +319,13 @@ export default function Map() {
             <h3 style="margin: 0 0 4px; font-size: 14px; font-weight: bold;">${displayName}</h3>
             <p style="margin: 0; font-size: 12px;">Type: ${highwayType}</p>
             <p style="margin: 0; font-size: 12px;">Dist to Crosswalk: <strong>${distance}m</strong></p>
+            <p style="margin: 0; font-size: 12px;">Nearest Crosswalk: <strong>${crossingLabel}</strong></p>
+            <p style="margin: 6px 0 0; font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer">Google Maps</a>
+              <a href="${streetViewUrl}" target="_blank" rel="noopener noreferrer">Street View</a>
+              ${osmViewUrl ? `<a href="${osmViewUrl}" target="_blank" rel="noopener noreferrer">OSM</a>` : ''}
+              ${osmEditUrl ? `<a href="${osmEditUrl}" target="_blank" rel="noopener noreferrer">Edit OSM</a>` : ''}
+            </p>
           </div>
         `)
         .addTo(map);
@@ -266,5 +347,33 @@ export default function Map() {
     };
   }, [style]);
 
-  return <div id="map" ref={mapContainerRef} />;
+  return (
+    <div className="map-shell">
+      <div id="map" ref={mapContainerRef} />
+
+      <div className="map-overlay map-overlay--title" role="heading" aria-level={1}>
+        Seattle Pedestrian Awfulness Map
+      </div>
+
+      <div className="map-overlay map-overlay--legend" aria-label="Legend">
+        <div className="legend-title">Legend (Marked Crossing Availability)</div>
+        <div className="legend-row">
+          <span className="legend-line legend-line--green" />
+          <span>0–50m to crossing (and residential streets)</span>
+        </div>
+        <div className="legend-row">
+          <span className="legend-line legend-line--yellow" />
+          <span>50–75m</span>
+        </div>
+        <div className="legend-row">
+          <span className="legend-line legend-line--red" />
+          <span>75–100m</span>
+        </div>
+        <div className="legend-row">
+          <span className="legend-line legend-line--darkred" />
+          <span>100m+</span>
+        </div>
+      </div>
+    </div>
+  );
 }

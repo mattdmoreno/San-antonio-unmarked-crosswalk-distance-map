@@ -13,3 +13,79 @@ body {
   height: 100vh;
   width: 100vw;
 }
+
+.map-shell {
+  position: relative;
+  height: 100vh;
+  width: 100vw;
+}
+
+.map-overlay {
+  position: absolute;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: #111;
+}
+
+.map-overlay--title {
+  top: 12px;
+  left: 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.map-overlay--legend {
+  left: 12px;
+  bottom: 12px;
+  min-width: 220px;
+  font-size: 12px;
+}
+
+.legend-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.legend-line {
+  display: inline-block;
+  width: 34px;
+  height: 0;
+  border-top-width: 4px;
+  border-top-style: solid;
+  border-top-color: #000;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+/* Match the map paint colors from components/Map.tsx */
+.legend-line--green {
+  border-top-color: #4caf50;
+}
+
+.legend-line--yellow {
+  border-top-color: #fdd835;
+}
+
+.legend-line--red {
+  border-top-color: #e53935;
+}
+
+.legend-line--darkred {
+  border-top-color: #b71c1c;
+}
+
+.legend-line--dash {
+  border-top-style: dashed;
+  border-top-color: #333;
+}
