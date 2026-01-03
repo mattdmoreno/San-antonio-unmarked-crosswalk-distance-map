@@ -28,6 +28,14 @@ docker compose exec -T db psql -U postgres -d seattle_pedestrians -c "CREATE EXT
 
 # Import data
 echo "Importing Seattle.osm.pbf into PostGIS..."
-PGPASSWORD=postgres osm2pgsql   --create --slim --hstore   -d seattle_pedestrians   -U postgres   -H localhost   -P 5432   ./data/Seattle.osm.pbf
+OSM2PGSQL_PROCESSES="${OSM2PGSQL_PROCESSES:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 4)}"
+PGPASSWORD=postgres osm2pgsql \
+    --create --slim --hstore \
+    --number-processes "$OSM2PGSQL_PROCESSES" \
+    -d seattle_pedestrians \
+    -U postgres \
+    -H localhost \
+    -P 5432 \
+    ./data/Seattle.osm.pbf
 
 echo "Import complete!"
