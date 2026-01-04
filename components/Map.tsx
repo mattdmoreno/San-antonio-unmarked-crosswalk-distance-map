@@ -24,6 +24,12 @@ type PinnedParams = {
   zoom?: number;
 };
 
+function buildUnmarkedCrossingTitle(roadName: string | null): string {
+  const trimmed = (roadName ?? '').trim();
+  if (!trimmed) return 'Unmarked crossing';
+  return `Unmarked crossing on ${trimmed}`;
+}
+
 function parseInitialViewportFromUrl(): ViewportParams | null {
   if (typeof window === 'undefined') return null;
 
@@ -607,13 +613,14 @@ export default function Map() {
           const distanceToMarkedCrosswalkMeters =
             typeof distRaw === 'number' ? distRaw : distRaw != null ? Number(distRaw) : null;
 
+          const roadName = typeof p.frogger_road_name === 'string' ? p.frogger_road_name : null;
           const roadHighway = typeof p.frogger_road_highway === 'string' ? p.frogger_road_highway : null;
 
           setSelected(null);
           selectedUnmarkedIdRef.current = id;
           setSelectedUnmarked({
             id,
-            title: 'Unmarked crossing',
+            title: buildUnmarkedCrossingTitle(roadName),
             lngLat,
             froggerIndex: Number.isFinite(froggerIndex) ? froggerIndex : 0,
             lanes: Number.isFinite(lanes as number) ? (lanes as number) : null,
@@ -742,6 +749,7 @@ export default function Map() {
         typeof distRaw === 'number' ? distRaw : distRaw != null ? Number(distRaw) : null;
 
       const maxspeed = typeof p.frogger_maxspeed === 'string' ? p.frogger_maxspeed : null;
+      const roadName = typeof p.frogger_road_name === 'string' ? p.frogger_road_name : null;
       const roadHighway = typeof p.frogger_road_highway === 'string' ? p.frogger_road_highway : null;
 
       // Keep speedMph in the model in case we want it later,
@@ -751,7 +759,7 @@ export default function Map() {
 
       return {
         id,
-        title: 'Unmarked crossing',
+        title: buildUnmarkedCrossingTitle(roadName),
         lngLat: coordinates,
         froggerIndex: Number.isFinite(froggerIndex) ? froggerIndex : 0,
         lanes: Number.isFinite(lanes as number) ? (lanes as number) : null,

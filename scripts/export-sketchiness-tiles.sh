@@ -77,7 +77,7 @@ ogr2ogr -f GeoJSONSeq "$STREETS_GJ" \
 
 ogr2ogr -f GeoJSONSeq "$UNMARKED_GJ" \
   "PG:host=$PGHOST port=$PGPORT dbname=$PGDATABASE user=$PGUSER password=$PGPASSWORD" \
-  -sql "SELECT point_osm_id, frogger_index, frogger_dist_to_marked_crosswalk_m, frogger_road_highway, frogger_lanes, frogger_maxspeed, frogger_speed_mph, geom FROM unmarked_crosswalk_points_enriched WHERE geom IS NOT NULL"
+  -sql "SELECT point_osm_id, frogger_index, frogger_dist_to_marked_crosswalk_m, frogger_road_name, frogger_road_highway, frogger_lanes, frogger_maxspeed, frogger_speed_mph, geom FROM unmarked_crosswalk_points_enriched WHERE geom IS NOT NULL"
 
 GJ_LINES="$(wc -l < "$STREETS_GJ" | tr -d ' ')"
 GJ_SIZE="$(du -h "$STREETS_GJ" | awk '{print $1}')"
