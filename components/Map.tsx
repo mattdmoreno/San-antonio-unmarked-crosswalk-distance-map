@@ -333,28 +333,40 @@ export default function Map() {
       new maplibregl.Popup()
         .setLngLat(coordinates)
         .setHTML(`
-          <div style="font-family: sans-serif; padding: 4px;">
+          <div style="font-family: sans-serif; padding: 4px; width: fit-content; max-width: calc(100vw - 40px); box-sizing: border-box;">
             <h3 style="margin: 0 0 4px; font-size: 14px; font-weight: bold;">${displayName}</h3>
             <p style="margin: 0; font-size: 12px;">Type: ${highwayType}</p>
             ${isResidential ? '' : `<p style="margin: 0; font-size: 12px;">Dist to Crosswalk: <strong>${distance}m</strong></p>`}
-            <div style="margin: 8px 0 0; display: flex; gap: 8px; flex-wrap: wrap;">
+            <div style="margin: 8px 0 0; display: flex; flex-direction: column; gap: 8px;">
               <a
                 href="${streetViewUrl}"
                 target="_blank"
                 rel="noopener noreferrer"
-                style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #d0d0d0; border-radius: 6px; text-decoration: none; color: inherit; background: #ffffff; font-size: 12px;"
+                style="align-self: flex-start; width: fit-content; max-width: 100%; display: inline-flex; justify-content: center; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #d0d0d0; border-radius: 6px; text-decoration: none; color: inherit; background: #ffffff; font-size: 12px; white-space: nowrap; text-align: center; line-height: 1.2;"
               >
-                <img src="${googleFaviconUrl}" alt="" width="16" height="16" style="display: block;" />
-                Street View
+                <img
+                  src="${googleFaviconUrl}"
+                  alt=""
+                  width="16"
+                  height="16"
+                  style="display: block; flex: 0 0 auto; object-fit: contain;"
+                />
+                <span>Street View</span>
               </a>
               <a
                 href="${osmViewUrl}"
                 target="_blank"
                 rel="noopener noreferrer"
-                style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #d0d0d0; border-radius: 6px; text-decoration: none; color: inherit; background: #ffffff; font-size: 12px;"
+                style="align-self: flex-start; width: fit-content; max-width: 100%; display: inline-flex; justify-content: center; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #d0d0d0; border-radius: 6px; text-decoration: none; color: inherit; background: #ffffff; font-size: 12px; white-space: nowrap; text-align: center; line-height: 1.2;"
               >
-                <img src="${osmFaviconUrl}" alt="" width="16" height="16" style="display: block;" />
-                OpenStreetMap
+                <img
+                  src="${osmFaviconUrl}"
+                  alt=""
+                  width="16"
+                  height="16"
+                  style="display: block; flex: 0 0 auto; object-fit: contain;"
+                />
+                <span>OpenStreetMap</span>
               </a>
             </div>
             ${reportIssueUrl ? `<div style="margin: 8px 0 0; font-size: 12px;"><a href="${reportIssueUrl}" target="_blank" rel="noopener noreferrer">Report an issue</a></div>` : ''}
