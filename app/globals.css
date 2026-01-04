@@ -57,6 +57,12 @@ body {
   animation: map-overlay-enter 140ms ease-out;
 }
 
+@media (max-width: 640px) {
+  .map-shell--has-selection .map-overlay--title {
+    display: none;
+  }
+}
+
 @keyframes map-overlay-enter {
   from {
     opacity: 0;
