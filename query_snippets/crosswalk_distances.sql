@@ -16,6 +16,7 @@ DROP TABLE IF EXISTS marked_crosswalk_road;
 DROP TABLE IF EXISTS road_segments_20m;
 DROP TABLE IF EXISTS road_segments_20m_crosswalk_dist;
 DROP TABLE IF EXISTS streets_analyzed;
+DROP TABLE IF EXISTS crosswalk_points_enriched;
 
 -- Ensure base road geometry has a GiST index (needed for many spatial ops; harmless if already present)
 CREATE INDEX IF NOT EXISTS roads_geom_gist ON roads USING GIST (geom);
@@ -98,34 +99,169 @@ ANALYZE road_segments_20m;
 -- Nearest marked crosswalk distance per segment, considering crosswalks on roads with the same name.
 -- Only searches within 500m; if none found, distance is set to 500m.
 CREATE UNLOGGED TABLE road_segments_20m_crosswalk_dist AS
-SELECT
-    s.road_osm_id,
-    s.name,
-    s.highway,
-    s.segment_no,
-    s.geom,
-    nearest.crosswalk_id AS nearest_marked_crosswalk_id,
-    COALESCE(nearest.dist_m, 500.0::double precision) AS dist_to_marked_crosswalk_m
-FROM road_segments_20m s
-LEFT JOIN LATERAL (
+WITH seg_base AS (
     SELECT
-        m.crosswalk_id,
-        ST_Distance(s.geom, m.geom) AS dist_m
-    FROM marked_crosswalk_road m
-    JOIN roads r2
-      ON r2.road_osm_id = m.road_osm_id
-    WHERE s.name IS NOT NULL
-      AND btrim(s.name) <> ''
-      AND r2.name = s.name
-      AND ST_DWithin(s.geom, m.geom, 500.0)
-    ORDER BY s.geom <-> m.geom
-    LIMIT 1
-) AS nearest ON true;
+        s.road_osm_id,
+        s.name,
+        s.highway,
+        s.segment_no,
+        s.geom,
+        (r.tags->'maxspeed') AS maxspeed,
+        (r.tags->'lanes') AS lanes_raw,
+        CASE
+            WHEN (r.tags->'lanes') ~ '^\d+$' THEN (r.tags->'lanes')::int
+            WHEN (r.tags->'lanes:forward') ~ '^\d+$' AND (r.tags->'lanes:backward') ~ '^\d+$'
+                THEN (r.tags->'lanes:forward')::int + (r.tags->'lanes:backward')::int
+            ELSE NULL::int
+        END AS lanes,
+        CASE
+            WHEN r.tags->'maxspeed' IS NULL OR btrim(r.tags->'maxspeed') = '' THEN NULL::double precision
+            -- Values like "30", "30 mph", "25;35" (take first). Assume mph.
+            ELSE NULLIF(regexp_replace(split_part(r.tags->'maxspeed', ';', 1), '[^0-9]+', '', 'g'), '')::double precision
+        END AS speed_mph
+    FROM road_segments_20m s
+    JOIN roads r
+      ON r.road_osm_id = s.road_osm_id
+),
+seg_dist AS (
+    SELECT
+        sb.*,
+        nearest.crosswalk_id AS nearest_marked_crosswalk_id,
+        COALESCE(nearest.dist_m, 500.0::double precision) AS dist_to_marked_crosswalk_m
+    FROM seg_base sb
+    LEFT JOIN LATERAL (
+        SELECT
+            m.crosswalk_id,
+            ST_Distance(sb.geom, m.geom) AS dist_m
+        FROM marked_crosswalk_road m
+        JOIN roads r2
+          ON r2.road_osm_id = m.road_osm_id
+        WHERE sb.name IS NOT NULL
+          AND btrim(sb.name) <> ''
+          AND r2.name = sb.name
+          AND ST_DWithin(sb.geom, m.geom, 500.0)
+        ORDER BY sb.geom <-> m.geom
+        LIMIT 1
+    ) AS nearest ON true
+)
+SELECT
+    sd.road_osm_id,
+    sd.name,
+    sd.highway,
+    sd.segment_no,
+    sd.geom,
+    sd.nearest_marked_crosswalk_id,
+    sd.dist_to_marked_crosswalk_m,
+
+    -- Road attributes needed for Frogger Index
+    sd.maxspeed,
+    sd.lanes_raw,
+    sd.lanes,
+    sd.speed_mph,
+
+    -- Frogger components
+    CASE
+        WHEN sd.speed_mph IS NULL THEN 0.0
+        ELSE sqrt(LEAST(1.0, GREATEST(0.0, ((sd.speed_mph - 20.0) / 50.0))))
+    END AS speed_score,
+    CASE
+        WHEN sd.lanes IS NULL THEN 0.0
+        WHEN sd.lanes <= 2 THEN 0.0
+        WHEN sd.lanes = 3 THEN 0.25
+        WHEN sd.lanes = 4 THEN 0.5
+        WHEN sd.lanes = 5 THEN 0.75
+        ELSE 1.0
+    END AS lanes_score,
+    CASE
+        WHEN sd.highway IN ('residential', 'living_street', 'service') THEN 0.0
+        WHEN sd.highway IN ('tertiary', 'tertiary_link') THEN 0.1
+        WHEN sd.highway IN ('secondary', 'secondary_link') THEN 0.25
+        WHEN sd.highway IN ('primary', 'primary_link') THEN 0.5
+        WHEN sd.highway IN ('trunk', 'trunk_link') THEN 0.75
+        WHEN sd.highway IN ('motorway', 'motorway_link') THEN 1.0
+        ELSE NULL::double precision
+    END AS volume_score,
+    LEAST(1.0, GREATEST(0.0, ((sd.dist_to_marked_crosswalk_m - 50.0) / 150.0))) AS distance_from_crosswalk_score,
+
+    -- Frogger Index (hard-zero on residential/local streets)
+    CASE
+        WHEN sd.highway IN ('residential', 'living_street', 'service') THEN 0.0
+        ELSE (
+            (
+                (
+                    (1.0 * COALESCE(
+                        CASE
+                            WHEN sd.speed_mph IS NULL THEN 0.0
+                            ELSE sqrt(LEAST(1.0, GREATEST(0.0, ((sd.speed_mph - 20.0) / 50.0))))
+                        END,
+                        0.0
+                    ))
+                    + (1.0 * COALESCE(
+                        CASE
+                            WHEN sd.lanes IS NULL THEN 0.0
+                            WHEN sd.lanes <= 2 THEN 0.0
+                            WHEN sd.lanes = 3 THEN 0.25
+                            WHEN sd.lanes = 4 THEN 0.5
+                            WHEN sd.lanes = 5 THEN 0.75
+                            ELSE 1.0
+                        END,
+                        0.0
+                    ))
+                    + (0.5 * COALESCE(
+                        CASE
+                            WHEN sd.highway IN ('residential', 'living_street', 'service') THEN 0.0
+                            WHEN sd.highway IN ('tertiary', 'tertiary_link') THEN 0.1
+                            WHEN sd.highway IN ('secondary', 'secondary_link') THEN 0.25
+                            WHEN sd.highway IN ('primary', 'primary_link') THEN 0.5
+                            WHEN sd.highway IN ('trunk', 'trunk_link') THEN 0.75
+                            WHEN sd.highway IN ('motorway', 'motorway_link') THEN 1.0
+                            ELSE NULL::double precision
+                        END,
+                        0.5
+                    ))
+                ) / 2.5
+            )
+            * LEAST(1.0, GREATEST(0.0, ((sd.dist_to_marked_crosswalk_m - 50.0) / 150.0)))
+        )
+    END AS frogger_index
+FROM seg_dist sd;
 
 CREATE INDEX road_segments_20m_crosswalk_dist_road_idx ON road_segments_20m_crosswalk_dist (road_osm_id);
 CREATE INDEX road_segments_20m_crosswalk_dist_geom_gist ON road_segments_20m_crosswalk_dist USING GIST (geom);
 
 ANALYZE road_segments_20m_crosswalk_dist;
+
+-- Crosswalk point markers enriched with road/segment details (one "best" road per point).
+-- Selects the segment on each associated road that the point snaps to, then picks
+-- the highest frogger_index among those candidates.
+CREATE UNLOGGED TABLE crosswalk_points_enriched AS
+SELECT
+    cp.*,
+    best.road_osm_id AS frogger_road_osm_id,
+    best.highway AS frogger_road_highway,
+    best.maxspeed AS frogger_maxspeed,
+    best.lanes AS frogger_lanes,
+    best.dist_to_marked_crosswalk_m AS frogger_dist_to_marked_crosswalk_m,
+    best.speed_score AS frogger_speed_score,
+    best.lanes_score AS frogger_lanes_score,
+    best.volume_score AS frogger_volume_score,
+    best.distance_from_crosswalk_score AS frogger_distance_from_crosswalk_score,
+    best.frogger_index AS frogger_index
+FROM crosswalk_points cp
+LEFT JOIN LATERAL (
+    SELECT
+        s.*
+    FROM unnest(cp.road_osm_ids) AS rid(road_osm_id)
+    JOIN road_segments_20m_crosswalk_dist s
+      ON s.road_osm_id = rid.road_osm_id
+    WHERE ST_DWithin(cp.geom, s.geom, 0.5)
+    ORDER BY s.frogger_index DESC NULLS LAST, cp.geom <-> s.geom
+    LIMIT 1
+) AS best ON true;
+
+CREATE INDEX crosswalk_points_enriched_point_idx ON crosswalk_points_enriched (point_osm_id);
+CREATE INDEX crosswalk_points_enriched_geom_gist ON crosswalk_points_enriched USING GIST (geom);
+ANALYZE crosswalk_points_enriched;
 
 -- Canonical serving/export table (keeps the property names the map style expects).
 CREATE UNLOGGED TABLE streets_analyzed AS
@@ -134,6 +270,9 @@ SELECT
     name,
     highway,
     dist_to_marked_crosswalk_m AS dist_to_crossing_meters,
+    maxspeed,
+    lanes,
+    frogger_index,
     (nearest_marked_crosswalk_id IS NOT NULL) AS nearest_crossing_marked,
     geom
 FROM road_segments_20m_crosswalk_dist;

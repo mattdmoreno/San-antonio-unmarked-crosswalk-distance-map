@@ -5,6 +5,25 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "Running sketchiness analysis..."
 
+# Ensure the database container is running and ready.
+echo "Checking if database is running..."
+if ! docker compose ps --status running --services | grep -qx "db"; then
+	echo "Starting database..."
+	docker compose up -d db
+fi
+
+echo "Waiting for database to be ready..."
+for i in {1..60}; do
+	if docker compose exec -T db pg_isready -U postgres -d seattle_pedestrians >/dev/null 2>&1; then
+		break
+	fi
+	sleep 1
+	if [ "$i" -eq 60 ]; then
+		echo "Database did not become ready in time" >&2
+		exit 1
+	fi
+done
+
 PSQL_VARS=()
 if [ -n "${MIN_LON:-}" ]; then PSQL_VARS+=( -v "min_lon=$MIN_LON" ); fi
 if [ -n "${MIN_LAT:-}" ]; then PSQL_VARS+=( -v "min_lat=$MIN_LAT" ); fi
@@ -31,4 +50,14 @@ docker compose exec -T db psql \
 	-v ON_ERROR_STOP=1 \
 	--echo-errors \
 	< "$ROOT_DIR/query_snippets/crosswalk_distances.sql"
+
+echo "Phase 3/3: Build unmarked crosswalks table"
+docker compose exec -T db psql \
+	-U postgres \
+	-d seattle_pedestrians \
+	-X \
+	"${PSQL_VARS[@]}" \
+	-v ON_ERROR_STOP=1 \
+	--echo-errors \
+	< "$ROOT_DIR/query_snippets/unmarked_crosswalks.sql"
 echo "Analysis complete!"

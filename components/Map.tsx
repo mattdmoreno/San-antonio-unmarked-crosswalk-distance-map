@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as pmtiles from 'pmtiles';
 
 import FeatureInfoPanel, { type FeatureInfo } from './FeatureInfoPanel';
+import UnmarkedCrossingInfoPanel, { type UnmarkedCrossingInfo } from './UnmarkedCrossingInfoPanel';
 
 const SEATTLE_CENTER: [number, number] = [-122.3321, 47.6062];
 
@@ -247,6 +248,23 @@ function buildBasicOpenMapTilesStyle(pmtilesUrl: string, sketchinessUrl: string)
         paint: sketchinessLinePaint,
       },
 
+      // Unmarked crossings hit-test layer (DOM markers are rendered separately).
+      // Keep this invisible but queryable so we can place Font Awesome markers for
+      // currently-visible points.
+      {
+        id: 'unmarked-crossings-hit',
+        type: 'circle',
+        source: 'sketchiness',
+        'source-layer': 'unmarked_crossings',
+        filter: ['>', ['get', 'frogger_index'], 0.2],
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 16, 10, 20, 14],
+          'circle-color': '#000000',
+          'circle-opacity': 0.0,
+          'circle-stroke-width': 0,
+        },
+      },
+
       // Road labels (street names)
       {
         id: 'road_label',
@@ -309,11 +327,18 @@ export default function Map() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
+  const unmarkedCrossingMarkersRef = useRef<Map<number, maplibregl.Marker>>(new globalThis.Map());
+  const selectedUnmarkedIdRef = useRef<number | null>(null);
   const previouslyHadSelectionRef = useRef(false);
   const unitsRejectTimeoutRef = useRef<number | null>(null);
 
   const [selected, setSelected] = useState<FeatureInfo | null>(null);
+  const [selectedUnmarked, setSelectedUnmarked] = useState<UnmarkedCrossingInfo | null>(null);
   const [unitsRejected, setUnitsRejected] = useState(false);
+
+  useEffect(() => {
+    selectedUnmarkedIdRef.current = selectedUnmarked?.id ?? null;
+  }, [selectedUnmarked]);
 
   useEffect(() => {
     if (!unitsRejected) {
@@ -344,35 +369,64 @@ export default function Map() {
   // If this page was opened via a share link (pin=1), we keep `pin` in the URL
   // while the feature panel is open. Once the panel closes, remove it.
   useEffect(() => {
-    const hasSelection = Boolean(selected);
+    const hasSelection = Boolean(selected) || Boolean(selectedUnmarked);
     if (previouslyHadSelectionRef.current && !hasSelection) {
       clearUrlPin();
     }
     previouslyHadSelectionRef.current = hasSelection;
-  }, [selected]);
+  }, [selected, selectedUnmarked]);
+
+  const copyTextToClipboard = async (text: string): Promise<boolean> => {
+    if (typeof window === 'undefined') return false;
+
+    // Prefer modern Clipboard API when available.
+    try {
+      if (navigator.clipboard && (window.isSecureContext || window.location.hostname === 'localhost')) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // fall through to legacy fallback
+    }
+
+    // Legacy fallback: temporarily select a hidden textarea and execCommand('copy').
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '-1000px';
+      textarea.style.left = '-1000px';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
 
   const handleShare = async (): Promise<boolean> => {
     if (typeof window === 'undefined') return false;
-    if (!selected) return false;
+    if (!selected && !selectedUnmarked) return false;
 
     const map = mapRef.current;
     const zoom = map ? map.getZoom() : 11;
     const url = new URL(window.location.href);
-    url.searchParams.set('lat', selected.lngLat.lat.toFixed(6));
-    url.searchParams.set('lng', selected.lngLat.lng.toFixed(6));
+    const lngLat = selected ? selected.lngLat : selectedUnmarked!.lngLat;
+    url.searchParams.set('lat', lngLat.lat.toFixed(6));
+    url.searchParams.set('lng', lngLat.lng.toFixed(6));
     url.searchParams.set('z', zoom.toFixed(2));
     url.searchParams.set('pin', '1');
     url.searchParams.delete('zoom');
 
     const shareText = url.toString();
 
-    try {
-      await navigator.clipboard.writeText(shareText);
-      return true;
-    } catch {
-      window.prompt('Copy link:', shareText);
-      return false;
-    }
+    return await copyTextToClipboard(shareText);
   };
 
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
@@ -424,6 +478,177 @@ export default function Map() {
 
     mapRef.current = map;
 
+    const UNMARKED_FROGGER_THRESHOLD = 0.2;
+
+    const createUnmarkedCrossingMarkerElement = () => {
+      const el = document.createElement('div');
+      el.className = 'unmarked-crossing-marker';
+      el.innerHTML =
+        '<svg viewBox="-2.4 -2.4 28.80 28.80" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="#ffffff" aria-hidden="true">'
+        + '<g stroke-width="0"><rect x="-2.4" y="-2.4" width="28.80" height="28.80" rx="14.4" fill="#ffffff" strokewidth="0"></rect></g>'
+        + '<g stroke-linecap="round" stroke-linejoin="round"></g>'
+        + '<g>'
+        + '<path opacity="0.1" d="M10.2501 5.147L3.64909 17.0287C2.9085 18.3618 3.87244 20 5.39741 20H18.5994C20.1243 20 21.0883 18.3618 20.3477 17.0287L13.7467 5.147C12.9847 3.77538 11.0121 3.77538 10.2501 5.147Z" fill="#ff0000"></path>'
+        + '<path d="M12 10V13" stroke="#ff0000" stroke-width="2" stroke-linecap="round"></path>'
+        + '<path d="M12 16V15.9888" stroke="#ff0000" stroke-width="2" stroke-linecap="round"></path>'
+        + '<path d="M10.2515 5.147L3.65056 17.0287C2.90997 18.3618 3.8739 20 5.39887 20H18.6008C20.1258 20 21.0897 18.3618 20.3491 17.0287L13.7482 5.147C12.9861 3.77538 11.0135 3.77538 10.2515 5.147Z" stroke="#ff0000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>'
+        + '</g>'
+        + '</svg>';
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', 'Unmarked crossing');
+      return el;
+    };
+
+    const syncUnmarkedCrossingMarkers = () => {
+      // Only attempt when the style/layers are loaded.
+      if (!map.isStyleLoaded()) return;
+
+      const canvas = map.getCanvas();
+      // Use rendered features so geometry coordinates are lng/lat.
+      const features = map.queryRenderedFeatures(
+        [
+          [0, 0],
+          [canvas.clientWidth, canvas.clientHeight],
+        ],
+        { layers: ['unmarked-crossings-hit'] },
+      );
+
+      const bounds = map.getBounds();
+      const zoom = map.getZoom();
+
+      // Simple decluttering: keep at most one marker per NxN screen grid cell.
+      // Smaller cells at higher zoom means "show more" as you zoom in.
+      const cellSizePx = Math.round(Math.max(14, Math.min(36, 60 - 2.5 * zoom)));
+      const occupiedCells = new Set<string>();
+
+      const nextIds = new Set<number>();
+
+      for (const feature of features) {
+        const props = feature.properties;
+        if (!props) continue;
+
+        const idRaw = (props as Record<string, unknown>).point_osm_id;
+        const id = typeof idRaw === 'number' ? idRaw : Number(idRaw);
+        if (!Number.isFinite(id)) continue;
+
+        // Defensive: if the filter changes or tiles have weird types.
+        const froggerRaw = (props as Record<string, unknown>).frogger_index;
+        const frogger = typeof froggerRaw === 'number' ? froggerRaw : Number(froggerRaw);
+        if (!Number.isFinite(frogger) || frogger <= UNMARKED_FROGGER_THRESHOLD) continue;
+
+        if (feature.geometry.type !== 'Point') continue;
+        const coords = feature.geometry.coordinates;
+        if (!Array.isArray(coords) || coords.length < 2) continue;
+
+        const lng = Number(coords[0]);
+        const lat = Number(coords[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+
+        // Keep only markers actually in the viewport.
+        if (!bounds.contains([lng, lat])) continue;
+
+        const screen = map.project([lng, lat]);
+        if (screen.x < 0 || screen.y < 0 || screen.x > canvas.clientWidth || screen.y > canvas.clientHeight) continue;
+
+        const cellX = Math.floor(screen.x / cellSizePx);
+        const cellY = Math.floor(screen.y / cellSizePx);
+        const cellKey = `${cellX}:${cellY}`;
+        const selectedId = selectedUnmarkedIdRef.current;
+        if (selectedId !== id) {
+          if (occupiedCells.has(cellKey)) continue;
+          occupiedCells.add(cellKey);
+        }
+
+        nextIds.add(id);
+
+        const lngLat = new maplibregl.LngLat(lng, lat);
+        const existing = unmarkedCrossingMarkersRef.current.get(id);
+        if (existing) {
+          existing.setLngLat(lngLat);
+          existing
+            .getElement()
+            .classList.toggle('unmarked-crossing-marker--selected', selectedUnmarkedIdRef.current === id);
+          continue;
+        }
+
+        const element = createUnmarkedCrossingMarkerElement();
+        element.classList.toggle('unmarked-crossing-marker--selected', selectedUnmarkedIdRef.current === id);
+        element.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+
+          // If a share-link pin or previous street selection marker is present, clear it.
+          markerRef.current?.remove();
+          markerRef.current = null;
+
+          const googleFaviconUrl = 'https://www.google.com/s2/favicons?domain=google.com&sz=32';
+          const osmFaviconUrl = 'https://www.google.com/s2/favicons?domain=openstreetmap.org&sz=32';
+          const latLng = `${lngLat.lat},${lngLat.lng}`;
+          const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(latLng)}`;
+          const osmViewUrl = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(lngLat.lat))}&mlon=${encodeURIComponent(
+            String(lngLat.lng),
+          )}#map=19/${encodeURIComponent(String(lngLat.lat))}/${encodeURIComponent(String(lngLat.lng))}`;
+
+          const reportIssueUrl = reportIssueUrlTemplate ? buildReportIssueUrl(reportIssueUrlTemplate, lngLat, map.getZoom()) : null;
+
+          const p = feature.properties as Record<string, unknown>;
+          const froggerIndexRaw = p.frogger_index;
+          const froggerIndex = typeof froggerIndexRaw === 'number' ? froggerIndexRaw : Number(froggerIndexRaw);
+
+          const lanesRaw = p.frogger_lanes;
+          const lanes = typeof lanesRaw === 'number' ? lanesRaw : lanesRaw != null ? Number(lanesRaw) : null;
+
+          const maxspeed = typeof p.frogger_maxspeed === 'string' ? p.frogger_maxspeed : null;
+
+          const speedMphRaw = p.frogger_speed_mph;
+          const speedMph = typeof speedMphRaw === 'number' ? speedMphRaw : speedMphRaw != null ? Number(speedMphRaw) : null;
+
+          const distRaw = p.frogger_dist_to_marked_crosswalk_m;
+          const distanceToMarkedCrosswalkMeters =
+            typeof distRaw === 'number' ? distRaw : distRaw != null ? Number(distRaw) : null;
+
+          const roadHighway = typeof p.frogger_road_highway === 'string' ? p.frogger_road_highway : null;
+
+          setSelected(null);
+          selectedUnmarkedIdRef.current = id;
+          setSelectedUnmarked({
+            id,
+            title: 'Unmarked crossing',
+            lngLat,
+            froggerIndex: Number.isFinite(froggerIndex) ? froggerIndex : 0,
+            lanes: Number.isFinite(lanes as number) ? (lanes as number) : null,
+            maxspeed,
+            speedMph: Number.isFinite(speedMph as number) ? (speedMph as number) : null,
+            distanceToMarkedCrosswalkMeters: Number.isFinite(distanceToMarkedCrosswalkMeters as number)
+              ? (distanceToMarkedCrosswalkMeters as number)
+              : null,
+            roadHighway,
+            actions: [
+              { href: streetViewUrl, label: 'Street View', iconUrl: googleFaviconUrl },
+              { href: osmViewUrl, label: 'OSM', iconUrl: osmFaviconUrl },
+            ],
+            reportIssueUrl,
+          });
+        });
+
+        element.addEventListener('keydown', (evt) => {
+          if (evt.key !== 'Enter' && evt.key !== ' ') return;
+          evt.preventDefault();
+          element.click();
+        });
+
+        const marker = new maplibregl.Marker({ element, anchor: 'center' }).setLngLat(lngLat).addTo(map);
+        unmarkedCrossingMarkersRef.current.set(id, marker);
+      }
+
+      // Remove markers that are no longer in view.
+      for (const [id, marker] of unmarkedCrossingMarkersRef.current.entries()) {
+        if (nextIds.has(id)) continue;
+        marker.remove();
+        unmarkedCrossingMarkersRef.current.delete(id);
+      }
+    };
+
     const buildFeatureInfoFromProps = (props: maplibregl.GeoJSONFeature['properties'], coordinates: maplibregl.LngLat) => {
       if (!props) return null;
 
@@ -439,6 +664,14 @@ export default function Map() {
 
       const distanceMeters =
         typeof props.dist_to_crossing_meters === 'number' ? Math.round(props.dist_to_crossing_meters) : null;
+
+      const froggerIndexRaw = (props as Record<string, unknown>).frogger_index;
+      const froggerIndex = typeof froggerIndexRaw === 'number' ? froggerIndexRaw : froggerIndexRaw != null ? Number(froggerIndexRaw) : null;
+
+      const lanesRaw = (props as Record<string, unknown>).lanes;
+      const lanes = typeof lanesRaw === 'number' ? lanesRaw : lanesRaw != null ? Number(lanesRaw) : null;
+
+      const maxspeed = typeof (props as Record<string, unknown>).maxspeed === 'string' ? ((props as Record<string, unknown>).maxspeed as string) : null;
 
       const latLng = `${coordinates.lat},${coordinates.lng}`;
       const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(latLng)}`;
@@ -459,6 +692,9 @@ export default function Map() {
         highwayType,
         isResidential,
         distanceMeters,
+        froggerIndex: typeof froggerIndex === 'number' && Number.isFinite(froggerIndex) ? froggerIndex : null,
+        lanes: typeof lanes === 'number' && Number.isFinite(lanes) ? lanes : null,
+        maxspeed,
         lngLat: coordinates,
         actions: [
           { href: streetViewUrl, label: 'Street View', iconUrl: googleFaviconUrl },
@@ -468,17 +704,76 @@ export default function Map() {
       } satisfies FeatureInfo;
     };
 
+    const buildUnmarkedCrossingInfoFromProps = (
+      props: maplibregl.GeoJSONFeature['properties'],
+      coordinates: maplibregl.LngLat,
+    ): UnmarkedCrossingInfo | null => {
+      if (!props) return null;
+
+      const googleFaviconUrl = 'https://www.google.com/s2/favicons?domain=google.com&sz=32';
+      const osmFaviconUrl = 'https://www.google.com/s2/favicons?domain=openstreetmap.org&sz=32';
+
+      const latLng = `${coordinates.lat},${coordinates.lng}`;
+      const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(latLng)}`;
+      const osmViewUrl = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(
+        String(coordinates.lat),
+      )}&mlon=${encodeURIComponent(String(coordinates.lng))}#map=19/${encodeURIComponent(
+        String(coordinates.lat),
+      )}/${encodeURIComponent(String(coordinates.lng))}`;
+
+      const reportIssueUrl = reportIssueUrlTemplate
+        ? buildReportIssueUrl(reportIssueUrlTemplate, coordinates, map.getZoom())
+        : null;
+
+      const p = props as Record<string, unknown>;
+
+      const idRaw = p.point_osm_id;
+      const id = typeof idRaw === 'number' ? idRaw : Number(idRaw);
+      if (!Number.isFinite(id)) return null;
+
+      const froggerIndexRaw = p.frogger_index;
+      const froggerIndex = typeof froggerIndexRaw === 'number' ? froggerIndexRaw : Number(froggerIndexRaw);
+
+      const lanesRaw = p.frogger_lanes;
+      const lanes = typeof lanesRaw === 'number' ? lanesRaw : lanesRaw != null ? Number(lanesRaw) : null;
+
+      const distRaw = p.frogger_dist_to_marked_crosswalk_m;
+      const distanceToMarkedCrosswalkMeters =
+        typeof distRaw === 'number' ? distRaw : distRaw != null ? Number(distRaw) : null;
+
+      const maxspeed = typeof p.frogger_maxspeed === 'string' ? p.frogger_maxspeed : null;
+      const roadHighway = typeof p.frogger_road_highway === 'string' ? p.frogger_road_highway : null;
+
+      // Keep speedMph in the model in case we want it later,
+      // but the panel currently doesn't display it.
+      const speedMphRaw = p.frogger_speed_mph;
+      const speedMph = typeof speedMphRaw === 'number' ? speedMphRaw : speedMphRaw != null ? Number(speedMphRaw) : null;
+
+      return {
+        id,
+        title: 'Unmarked crossing',
+        lngLat: coordinates,
+        froggerIndex: Number.isFinite(froggerIndex) ? froggerIndex : 0,
+        lanes: Number.isFinite(lanes as number) ? (lanes as number) : null,
+        maxspeed,
+        speedMph: Number.isFinite(speedMph as number) ? (speedMph as number) : null,
+        distanceToMarkedCrosswalkMeters: Number.isFinite(distanceToMarkedCrosswalkMeters as number)
+          ? (distanceToMarkedCrosswalkMeters as number)
+          : null,
+        roadHighway,
+        actions: [
+          { href: streetViewUrl, label: 'Street View', iconUrl: googleFaviconUrl },
+          { href: osmViewUrl, label: 'OSM', iconUrl: osmFaviconUrl },
+        ],
+        reportIssueUrl,
+      } satisfies UnmarkedCrossingInfo;
+    };
+
     const applyPinnedLocationFromUrl = () => {
       const pinned = parsePinnedParamsFromUrl();
       if (!pinned) return;
 
       const coordinates = pinned.lngLat;
-
-      if (!markerRef.current) {
-        markerRef.current = new maplibregl.Marker().setLngLat(coordinates).addTo(map);
-      } else {
-        markerRef.current.setLngLat(coordinates);
-      }
 
       // Try to resolve the actual feature at this point so the info panel opens.
       const point = map.project(coordinates);
@@ -488,13 +783,41 @@ export default function Map() {
           [point.x - pad, point.y - pad],
           [point.x + pad, point.y + pad],
         ],
-        { layers: [...SKETCHINESS_LAYER_IDS] },
+        { layers: [...SKETCHINESS_LAYER_IDS, 'unmarked-crossings-hit'] },
       );
 
       if (features.length === 0) return;
 
-      const info = buildFeatureInfoFromProps(features[0].properties, coordinates);
+      const top = features[0];
+      if (top.layer.id === 'unmarked-crossings-hit') {
+        // For unmarked crossings, open the panel but don't add a pin marker.
+        markerRef.current?.remove();
+        markerRef.current = null;
+
+        const info = buildUnmarkedCrossingInfoFromProps(top.properties, coordinates);
+        if (!info) return;
+        setSelected(null);
+        selectedUnmarkedIdRef.current = info.id;
+        setSelectedUnmarked(info);
+
+        // The first `idle` event may have already created markers before we knew
+        // which one is selected; resync immediately so the selected one gets the
+        // highlighted style.
+        syncUnmarkedCrossingMarkers();
+        return;
+      }
+
+      // For streets, keep the existing share-link behavior: drop a pin marker.
+      if (!markerRef.current) {
+        markerRef.current = new maplibregl.Marker().setLngLat(coordinates).addTo(map);
+      } else {
+        markerRef.current.setLngLat(coordinates);
+      }
+
+      const info = buildFeatureInfoFromProps(top.properties, coordinates);
       if (!info) return;
+      setSelectedUnmarked(null);
+      selectedUnmarkedIdRef.current = null;
       setSelected(info);
     };
 
@@ -506,6 +829,10 @@ export default function Map() {
 
     map.on('load', syncUrlToMapViewport);
     map.on('moveend', syncUrlToMapViewport);
+
+    // Keep unmarked crossing DOM markers in sync with what tiles are visible.
+    map.on('idle', syncUnmarkedCrossingMarkers);
+    map.on('moveend', syncUnmarkedCrossingMarkers);
 
     // If this URL was created via Share (pin=1), drop a marker (and select the feature if possible).
     map.once('idle', applyPinnedLocationFromUrl);
@@ -533,6 +860,8 @@ export default function Map() {
       }
 
       setSelected(info);
+      setSelectedUnmarked(null);
+      selectedUnmarkedIdRef.current = null;
     };
 
     for (const layerId of SKETCHINESS_LAYER_IDS) {
@@ -553,18 +882,25 @@ export default function Map() {
     // Clear selection when clicking away from a feature.
     map.on('click', (e) => {
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [...SKETCHINESS_LAYER_IDS],
+        layers: [...SKETCHINESS_LAYER_IDS, 'unmarked-crossings-hit'],
       });
       if (features.length > 0) return;
 
       markerRef.current?.remove();
       markerRef.current = null;
       setSelected(null);
+      setSelectedUnmarked(null);
+      selectedUnmarkedIdRef.current = null;
     });
 
     return () => {
       markerRef.current?.remove();
       markerRef.current = null;
+
+      for (const marker of unmarkedCrossingMarkersRef.current.values()) {
+        marker.remove();
+      }
+      unmarkedCrossingMarkersRef.current.clear();
 
       map.remove();
       mapRef.current = null;
@@ -573,10 +909,11 @@ export default function Map() {
   }, [style]);
 
   return (
-    <div className={selected ? 'map-shell map-shell--has-selection' : 'map-shell'}>
+    <div className={selected || selectedUnmarked ? 'map-shell map-shell--has-selection' : 'map-shell'}>
       <div id="map" ref={mapContainerRef} />
 
       {selected ? <FeatureInfoPanel info={selected} onShare={handleShare} /> : null}
+      {selectedUnmarked ? <UnmarkedCrossingInfoPanel info={selectedUnmarked} onShare={handleShare} /> : null}
 
       <div className="map-overlay map-overlay--title" role="heading" aria-level={1}>
         Seattle Crosswalk Availability Map

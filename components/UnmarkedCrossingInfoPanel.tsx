@@ -9,15 +9,16 @@ type ActionLink = {
   iconUrl?: string;
 };
 
-export type FeatureInfo = {
+export type UnmarkedCrossingInfo = {
+  id: number;
   title: string;
-  highwayType: string;
-  isResidential: boolean;
-  distanceMeters?: number | null;
-  froggerIndex?: number | null;
+  lngLat: maplibregl.LngLat;
+  froggerIndex: number;
+  distanceToMarkedCrosswalkMeters?: number | null;
   lanes?: number | null;
   maxspeed?: string | null;
-  lngLat: maplibregl.LngLat;
+  speedMph?: number | null;
+  roadHighway?: string | null;
   actions: ActionLink[];
   reportIssueUrl?: string | null;
 };
@@ -79,19 +80,27 @@ const tableValueStyle: React.CSSProperties = {
   verticalAlign: 'top',
 };
 
+function formatMaybeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const num = typeof value === 'string' ? Number(value) : Number.NaN;
+  return Number.isFinite(num) ? num : null;
+}
+
 function froggerDifficultyLabel(froggerIndex: number): string {
   if (!Number.isFinite(froggerIndex)) return 'easy';
   if (froggerIndex < 0.2) return 'easy';
   if (froggerIndex < 0.4) return 'medium';
   if (froggerIndex < 0.6) return 'hard';
+  // Spec defines 0.6–0.8 = Ft. Lauderdale; indexes above 0.8 are also Ft. Lauderdale.
+  // Treat anything >=0.6 as this top bucket.
   return 'Ft. Lauderdale';
 }
 
-export default function FeatureInfoPanel({
+export default function UnmarkedCrossingInfoPanel({
   info,
   onShare,
 }: {
-  info: FeatureInfo;
+  info: UnmarkedCrossingInfo;
   onShare: () => Promise<boolean>;
 }) {
   const [tooltip, setTooltip] = useState<'hidden' | 'copy' | 'copied' | 'failed'>('hidden');
@@ -111,11 +120,12 @@ export default function FeatureInfoPanel({
     resetTimerRef.current = window.setTimeout(() => setTooltip('hidden'), 1200);
   };
 
-  const froggerIndex = typeof info.froggerIndex === 'number' ? info.froggerIndex : null;
-  const difficulty = typeof froggerIndex === 'number' ? froggerDifficultyLabel(froggerIndex) : null;
+  const lanes = formatMaybeNumber(info.lanes);
+  const dist = formatMaybeNumber(info.distanceToMarkedCrosswalkMeters);
+  const difficulty = froggerDifficultyLabel(info.froggerIndex);
 
   return (
-    <div className="map-overlay map-overlay--info" aria-label="Selected street">
+    <div className="map-overlay map-overlay--info" aria-label="Selected unmarked crossing">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>{info.title}</div>
@@ -156,23 +166,19 @@ export default function FeatureInfoPanel({
 
         <table style={tableStyle}>
           <tbody>
-            <tr>
-              <td style={tableKeyStyle}>Type</td>
-              <td style={tableValueStyle}>{info.highwayType}</td>
-            </tr>
-            {!info.isResidential && typeof info.distanceMeters === 'number' ? (
+            {typeof dist === 'number' ? (
               <tr>
                 <td style={tableKeyStyle}>Dist to marked</td>
                 <td style={tableValueStyle}>
-                  <strong>{info.distanceMeters}m</strong>
+                  <strong>{Math.round(dist)}m</strong>
                 </td>
               </tr>
             ) : null}
-            {typeof info.lanes === 'number' ? (
+            {typeof lanes === 'number' ? (
               <tr>
                 <td style={tableKeyStyle}>Lanes</td>
                 <td style={tableValueStyle}>
-                  <strong>{info.lanes}</strong>
+                  <strong>{lanes}</strong>
                 </td>
               </tr>
             ) : null}
@@ -184,14 +190,12 @@ export default function FeatureInfoPanel({
                 </td>
               </tr>
             ) : null}
-            {typeof froggerIndex === 'number' && difficulty ? (
-              <tr>
-                <td style={{ ...tableKeyStyle, paddingTop: 8 }}>Frogger difficulty index</td>
-                <td style={{ ...tableValueStyle, paddingTop: 8 }}>
-                  <strong>{froggerIndex.toFixed(2)}</strong> ({difficulty})
-                </td>
-              </tr>
-            ) : null}
+            <tr>
+              <td style={{ ...tableKeyStyle, paddingTop: 8 }}>Frogger difficulty index</td>
+              <td style={{ ...tableValueStyle, paddingTop: 8 }}>
+                <strong>{info.froggerIndex.toFixed(2)}</strong> ({difficulty})
+              </td>
+            </tr>
           </tbody>
         </table>
 
@@ -217,7 +221,6 @@ export default function FeatureInfoPanel({
             </a>
           </div>
         ) : null}
-
       </div>
     </div>
   );

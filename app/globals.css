@@ -52,7 +52,7 @@ body {
   top: calc(12px + env(safe-area-inset-top));
   /* Offset so it sits next to the zoom controls (top-right). */
   right: calc(56px + env(safe-area-inset-right));
-  max-width: min(320px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+  max-width: min(380px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
   font-size: 12px;
   animation: map-overlay-enter 140ms ease-out;
 }
@@ -151,4 +151,26 @@ body {
 .legend-line--dash {
   border-top-style: dashed;
   border-top-color: #333;
+}
+
+.unmarked-crossing-marker {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.unmarked-crossing-marker > svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.unmarked-crossing-marker.unmarked-crossing-marker--selected {
+  border: 2px solid #e53935;
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.unmarked-crossing-marker.unmarked-crossing-marker--selected > svg {
+  width: 22px;
+  height: 22px;
 }
