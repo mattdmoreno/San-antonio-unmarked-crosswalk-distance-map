@@ -310,8 +310,36 @@ export default function Map() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const previouslyHadSelectionRef = useRef(false);
+  const unitsRejectTimeoutRef = useRef<number | null>(null);
 
   const [selected, setSelected] = useState<FeatureInfo | null>(null);
+  const [unitsRejected, setUnitsRejected] = useState(false);
+
+  useEffect(() => {
+    if (!unitsRejected) {
+      if (unitsRejectTimeoutRef.current !== null) {
+        window.clearTimeout(unitsRejectTimeoutRef.current);
+        unitsRejectTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (unitsRejectTimeoutRef.current !== null) {
+      window.clearTimeout(unitsRejectTimeoutRef.current);
+    }
+
+    unitsRejectTimeoutRef.current = window.setTimeout(() => {
+      setUnitsRejected(false);
+      unitsRejectTimeoutRef.current = null;
+    }, 1500);
+
+    return () => {
+      if (unitsRejectTimeoutRef.current !== null) {
+        window.clearTimeout(unitsRejectTimeoutRef.current);
+        unitsRejectTimeoutRef.current = null;
+      }
+    };
+  }, [unitsRejected]);
 
   // If this page was opened via a share link (pin=1), we keep `pin` in the URL
   // while the feature panel is open. Once the panel closes, remove it.
@@ -571,6 +599,18 @@ export default function Map() {
         <div className="legend-row">
           <span className="legend-line legend-line--darkred" />
           <span>500m+</span>
+        </div>
+
+        <div className="legend-actions">
+          {unitsRejected ? (
+            <span className="legend-no" aria-live="polite">
+              no! 🙂
+            </span>
+          ) : (
+            <button type="button" className="legend-button" onClick={() => setUnitsRejected(true)}>
+              Change units
+            </button>
+          )}
         </div>
       </div>
     </div>
