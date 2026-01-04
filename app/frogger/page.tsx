@@ -13,6 +13,9 @@ type GameParams = {
   froggerIndex: number | null;
 };
 
+const LANE_H = 60;
+const SAFE_H = 72;
+
 function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -60,6 +63,15 @@ function froggerDifficultyLabel(froggerIndex: number | null): string {
   return 'Ft. Lauderdale';
 }
 
+function formatRoadType(value: string): string {
+  const trimmed = (value ?? '').trim();
+  if (!trimmed) return 'Unknown';
+
+  // Turn things like "primary" or "living_street" into "Primary" / "Living Street".
+  const normalized = trimmed.replace(/_/g, ' ').replace(/\s{2,}/g, ' ');
+  return normalized.replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
 type Car = {
   laneIndex: number;
   x: number;
@@ -99,27 +111,142 @@ function SpeedLimitSign({ speedMph }: { speedMph: number | null }) {
   );
 }
 
-function LanesBadge({ lanes }: { lanes: number }) {
+function InfoList({
+  lanes,
+  roadType,
+  froggerIndex,
+  difficulty,
+}: {
+  lanes: number;
+  roadType: string;
+  froggerIndex: number | null;
+  difficulty: string;
+}) {
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: '3px solid rgba(0, 0, 0, 0.85)',
+        gap: 6,
+        padding: '10px 12px',
+        border: '1px solid rgba(0, 0, 0, 0.12)',
         borderRadius: 10,
         background: 'rgba(255, 255, 255, 0.92)',
-        padding: '10px 14px',
-        minWidth: 140,
-        textAlign: 'center',
+        fontSize: 14,
+        fontWeight: 800,
+        lineHeight: 1.15,
+        minWidth: 220,
+      }}
+      aria-label="Road info"
+    >
+      <div>
+        <span style={{ color: 'rgba(0, 0, 0, 0.70)', fontWeight: 800 }}>Lanes:</span> {lanes}
+      </div>
+      <div>
+        <span style={{ color: 'rgba(0, 0, 0, 0.70)', fontWeight: 800 }}>Road type:</span> {roadType}
+      </div>
+      <div>
+        <span style={{ color: 'rgba(0, 0, 0, 0.70)', fontWeight: 800 }}>Frogger index:</span>{' '}
+        {typeof froggerIndex === 'number' ? froggerIndex.toFixed(2) : '—'}
+      </div>
+      <div>
+        <span style={{ color: 'rgba(0, 0, 0, 0.70)', fontWeight: 800 }}>Frogger difficulty:</span> {difficulty}
+      </div>
+    </div>
+  );
+}
+
+function abbreviateStreetDirections(name: string): string {
+  let out = name;
+
+  // Handle combined directions first so we don't convert "Northwest" -> "Nwest".
+  const combos: Array<[RegExp, string]> = [
+    [/\b(north\s*-?\s*west|northwest)\b/gi, 'NW'],
+    [/\b(north\s*-?\s*east|northeast)\b/gi, 'NE'],
+    [/\b(south\s*-?\s*west|southwest)\b/gi, 'SW'],
+    [/\b(south\s*-?\s*east|southeast)\b/gi, 'SE'],
+  ];
+
+  for (const [re, replacement] of combos) {
+    out = out.replace(re, replacement);
+  }
+
+  const singles: Array<[RegExp, string]> = [
+    [/\bnorth\b/gi, 'N'],
+    [/\bsouth\b/gi, 'S'],
+    [/\beast\b/gi, 'E'],
+    [/\bwest\b/gi, 'W'],
+  ];
+
+  for (const [re, replacement] of singles) {
+    out = out.replace(re, replacement);
+  }
+
+  return out.replace(/\s{2,}/g, ' ').trim();
+}
+
+function StreetNameSign({ name }: { name: string }) {
+  const displayName = abbreviateStreetDirections(name);
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '14px 22px',
+        borderRadius: 10,
+        border: '5px solid rgba(255, 255, 255, 0.95)',
+        background: '#1b5e20',
+        color: '#fff',
+        fontSize: 26,
+        fontWeight: 900,
+        fontFamily: 'Overpass, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+        letterSpacing: 0.2,
         lineHeight: 1,
+        textAlign: 'center',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        maxWidth: 'min(680px, calc(100% - 24px))',
+        boxShadow: '0 1px 0 rgba(0,0,0,0.10)',
         userSelect: 'none',
       }}
-      aria-label="Lane count"
+      aria-label="Street name"
     >
-      <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.8 }}>LANES</div>
-      <div style={{ fontSize: 38, fontWeight: 900, marginTop: 8 }}>{lanes}</div>
+      {displayName}
+    </div>
+  );
+}
+
+function DistanceArrowInline({ meters }: { meters: number }) {
+  const label = `${Math.round(meters)}m to nearest marked crosswalk`;
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '8px 10px',
+        border: '1px solid rgba(0, 0, 0, 0.12)',
+        borderRadius: 10,
+        background: 'rgba(255, 255, 255, 0.92)',
+        fontSize: 13,
+        fontWeight: 800,
+        color: 'rgba(0, 0, 0, 0.80)',
+        whiteSpace: 'nowrap',
+      }}
+      aria-label="Distance to nearest marked crosswalk"
+      title={label}
+    >
+      <span>{label}</span>
+      <svg width="120" height="14" viewBox="0 0 120 14" role="img" aria-label="Distance arrow">
+        <defs>
+          <marker id="arrowHeadSmall" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0,0 8,4 0,8" fill="#111" />
+          </marker>
+        </defs>
+        <line x1="0" y1="7" x2="116" y2="7" stroke="#111" strokeWidth="2.5" markerEnd="url(#arrowHeadSmall)" />
+      </svg>
     </div>
   );
 }
@@ -148,8 +275,8 @@ export default function FroggerPage() {
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const laneH = 70;
-    const safeH = 86;
+    const laneH = LANE_H;
+    const safeH = SAFE_H;
 
     const randomSpawnDelaySec = (speedMph: number | null) => {
       // Faster streets feel "busier" by spawning slightly more often.
@@ -165,8 +292,8 @@ export default function FroggerPage() {
       canvas.height = height;
 
       // Reset player position whenever size/params change.
-      playerRef.current.w = 24;
-      playerRef.current.h = 24;
+      playerRef.current.w = 22;
+      playerRef.current.h = 22;
       playerRef.current.x = Math.floor(width / 2 - playerRef.current.w / 2);
       playerRef.current.y = height - safeH + Math.floor((safeH - playerRef.current.h) / 2);
 
@@ -195,22 +322,23 @@ export default function FroggerPage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const laneH = 70;
-    const safeH = 86;
+    const laneH = LANE_H;
+    const safeH = SAFE_H;
 
     const onKeyDown = (evt: KeyboardEvent) => {
       if (evt.key.startsWith('Arrow')) evt.preventDefault();
 
       if (status !== 'playing') {
-        if (evt.key === 'Enter' || evt.key === ' ') {
+        // Any key restarts (ignore pure modifier keys).
+        if (evt.key !== 'Shift' && evt.key !== 'Alt' && evt.key !== 'Control' && evt.key !== 'Meta') {
           setResetToken((t) => t + 1);
         }
         return;
       }
 
       const p = playerRef.current;
-      const stepX = 30;
-      const stepY = 30;
+      const stepX = 26;
+      const stepY = 26;
 
       let dx = 0;
       let dy = 0;
@@ -243,8 +371,8 @@ export default function FroggerPage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const laneH = 70;
-    const safeH = 86;
+    const laneH = LANE_H;
+    const safeH = SAFE_H;
 
     const tick = (t: number) => {
       const ctx = canvas.getContext('2d');
@@ -285,16 +413,19 @@ export default function FroggerPage() {
 
       // Double center line
       if (params.lanes >= 2) {
-        const midY = roadY + roadH / 2;
+        // Put the divider between the two directions of travel.
+        // If the lane count is odd, bias so the top half has fewer lanes.
+        // Example: 5 lanes => 2 lanes above the divider, 3 below.
+        const dividerY = roadY + Math.floor(params.lanes / 2) * laneH;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(0, midY - 5);
-        ctx.lineTo(canvas.width, midY - 5);
+        ctx.moveTo(0, dividerY - 5);
+        ctx.lineTo(canvas.width, dividerY - 5);
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(0, midY + 5);
-        ctx.lineTo(canvas.width, midY + 5);
+        ctx.moveTo(0, dividerY + 5);
+        ctx.lineTo(canvas.width, dividerY + 5);
         ctx.stroke();
       }
 
@@ -339,7 +470,7 @@ export default function FroggerPage() {
       for (const car of carsRef.current) {
 
         const yCenter = roadY + car.laneIndex * laneH + laneH / 2;
-        const carH = 26;
+        const carH = 22;
         const carY = Math.floor(yCenter - carH / 2);
 
         ctx.fillStyle = '#e53935';
@@ -382,12 +513,12 @@ export default function FroggerPage() {
       if (status === 'hit') {
         ctx.fillStyle = '#e53935';
         ctx.font = 'bold 16px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
-        ctx.fillText('Hit! Press Enter to restart.', 14, canvas.height - 18);
+        ctx.fillText('Hit! Press any key to restart.', 14, canvas.height - 18);
       }
       if (status === 'won') {
         ctx.fillStyle = '#4caf50';
         ctx.font = 'bold 16px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
-        ctx.fillText('Made it! Press Enter to play again.', 14, canvas.height - 18);
+        ctx.fillText('Made it! Press any key to play again.', 14, canvas.height - 18);
       }
 
       animationRef.current = window.requestAnimationFrame(tick);
@@ -414,6 +545,7 @@ export default function FroggerPage() {
   };
 
   const difficulty = froggerDifficultyLabel(params.froggerIndex);
+  const roadType = formatRoadType(params.highway);
 
   return (
     <div
@@ -439,7 +571,7 @@ export default function FroggerPage() {
           padding: '14px 16px',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <button
               type="button"
@@ -489,63 +621,29 @@ export default function FroggerPage() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <LanesBadge lanes={params.lanes} />
             <SpeedLimitSign speedMph={params.speedMph} />
+            <InfoList lanes={params.lanes} roadType={roadType} froggerIndex={params.froggerIndex} difficulty={difficulty} />
           </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-          <div style={{ fontSize: 20, fontWeight: 900, marginTop: 10 }}>{params.name}</div>
+          <div style={{ fontSize: 20, fontWeight: 900, marginTop: 10 }} />
         </div>
 
-        <div style={{ marginTop: 8, fontSize: 14, fontWeight: 600, color: 'rgba(0, 0, 0, 0.75)' }}>
-          {params.highway} oreach {params.lanes} lane{params.lanes === 1 ? '' : 's'}
-          {typeof params.distToMarkedM === 'number' ? `  distance to nearest marked crosswalk: ${Math.round(params.distToMarkedM)}m` : ''}
-        </div>
-
-        <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-          <div style={{ fontSize: 16, fontWeight: 900 }}>
-            Good luck!
-          </div>
-
+        <div style={{ marginTop: 10, position: 'relative' }}>
           <div
             style={{
-              display: 'inline-flex',
-              alignItems: 'baseline',
-              gap: 8,
-              padding: '10px 14px',
-              border: '1px solid rgba(0, 0, 0, 0.12)',
-              borderRadius: 10,
-              background: 'rgba(255, 255, 255, 0.92)',
-              fontSize: 14,
-              fontWeight: 900,
-              whiteSpace: 'nowrap',
+              position: 'absolute',
+              left: 12,
+              top: SAFE_H,
+              transform: 'translateY(-50%)',
+              zIndex: 1,
+              pointerEvents: 'none',
             }}
-            aria-label="Frogger difficulty"
           >
-            <span>Frogger:</span>
-            <span>{typeof params.froggerIndex === 'number' ? params.froggerIndex.toFixed(2) : '—'}</span>
-            <span style={{ fontWeight: 800, color: 'rgba(0, 0, 0, 0.75)' }}>({difficulty})</span>
+            <StreetNameSign name={params.name} />
           </div>
-        </div>
 
-        {typeof params.distToMarkedM === 'number' ? (
-          <div style={{ marginTop: 12 }} aria-label="Distance to nearest marked crosswalk">
-            <svg width="100%" height="44" viewBox="0 0 1000 44" role="img" aria-label="Distance arrow">
-              <defs>
-                <marker id="arrowHead" markerWidth="12" markerHeight="10" refX="10" refY="5" orient="auto">
-                  <polygon points="0,0 12,5 0,10" fill="#111" />
-                </marker>
-              </defs>
-              <line x1="24" y1="22" x2="976" y2="22" stroke="#111" strokeWidth="4" markerEnd="url(#arrowHead)" />
-              <text x="500" y="16" textAnchor="middle" fontSize="16" fontWeight="800" fill="#111">
-                {Math.round(params.distToMarkedM)}m to nearest marked crosswalk
-              </text>
-            </svg>
-          </div>
-        ) : null}
-
-        <div style={{ marginTop: 10 }}>
           <canvas
             ref={canvasRef}
             style={{
@@ -559,8 +657,20 @@ export default function FroggerPage() {
           />
         </div>
 
-        <div style={{ marginTop: 10, fontSize: 14, fontWeight: 700, color: 'rgba(0, 0, 0, 0.75)' }}>
-          Controls: arrow keys or WASD. Press Enter to restart.
+        <div
+          style={{
+            marginTop: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(0, 0, 0, 0.75)' }}>
+            Controls: arrow keys or WASD. Press any key to restart.
+          </div>
+          {typeof params.distToMarkedM === 'number' ? <DistanceArrowInline meters={params.distToMarkedM} /> : null}
         </div>
       </div>
     </div>
