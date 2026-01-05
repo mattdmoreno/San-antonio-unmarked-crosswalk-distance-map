@@ -929,7 +929,7 @@ export default function Map() {
       <div id="map" ref={mapContainerRef} />
 
       {selected ? <FeatureInfoPanel info={selected} onShare={handleShare} unitIndex={0} /> : null}
-      {selectedUnmarked ? <UnmarkedCrossingInfoPanel info={selectedUnmarked} onShare={handleShare} unitIndex={0} /> : null}
+      {selectedUnmarked ? <UnmarkedCrossingInfoPanel info={selectedUnmarked} onShare={handleShare} /> : null}
 
       <div className="map-overlay map-overlay--title" role="heading" aria-level={1}>
         Seattle Crosswalk Availability Map
