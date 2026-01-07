@@ -7,7 +7,7 @@ PUBLIC_DIR="$ROOT_DIR/public"
 
 mkdir -p "$PUBLIC_DIR"
 
-for f in basemap-seattle.pmtiles sketchiness.pmtiles; do
+for f in basemap-san-antonio.pmtiles sketchiness.pmtiles; do
   if [[ ! -f "$DATA_DIR/$f" ]]; then
     echo "Error: missing $DATA_DIR/$f" >&2
     echo "Run the tile build/export first (see README)." >&2
