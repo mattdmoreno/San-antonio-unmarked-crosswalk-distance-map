@@ -1,0 +1,10 @@
+#!/bin/bash
+# Download Texas extract (if you haven’t yet)
+curl -L -o data/texas.osm.pbf https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf
+
+# Clip to San Antonio bounding box
+osmium extract \
+  --bbox="-98.66,29.15,-98.36,29.55" \
+  data/texas.osm.pbf \
+  -o data/san-antonio.osm.pbf
+
